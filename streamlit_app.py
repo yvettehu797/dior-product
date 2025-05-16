@@ -15,7 +15,7 @@ st.caption("Powered by Qwen Max through Alibaba Cloud Bailian Platform")
 
 # ===== 配置区 =====
 with st.sidebar:
-    st.image("/workspaces/dior-product/images/截屏2025-05-09 17.19.08.png", width=150)
+    st.image(f'images/截屏2025-05-09 17.19.08.png', width=150)
     st.header("About This Assistant", divider="gray")
     st.caption("Dior Couture | Product")
     st.write("""
@@ -66,7 +66,7 @@ def show_image(doc_name):
         st.image(image_path, caption=f"{doc_name}", use_container_width=True)
     else:
         st.warning(f"Image not found: {image_path}")
-        st.image("/workspaces/dior-product/images/截屏2025-05-09 17.19.08.png",
+        st.image(f'images/截屏2025-05-09 17.19.08.png',
                  caption="Placeholder Image", use_container_width=True)
 
 # 辅助函数 - 显示文档引用
@@ -276,7 +276,7 @@ for msg in st.session_state.messages:
                                 st.image(image_path, caption=f"{doc_name}", use_container_width=True)
                             else:
                                 st.warning(f"Image not found: {image_path}")
-                                st.image("/workspaces/dior-product/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
+                                st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
                     else:
                         # 处理非字典类型的引用
                         image_path = f'images/{reference}.png'
@@ -369,7 +369,7 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                                     st.image(image_path, caption=f"{doc_name}", use_container_width=True)
                                 else:
                                     st.warning(f"Image not found: {image_path}")
-                                    st.image("/workspaces/dior-product/images/截屏2025-05-09 17.19.08.png", caption="Placeholder Image", use_container_width=True)
+                                    st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
                         else:
                             # 处理非字典类型的引用
                             image_path = f'images/{reference}.png'
