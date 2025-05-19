@@ -136,7 +136,7 @@ def show_stock_query():
 def query_stock(mmc: str = None, size_code: str = None, product_name: str = None) -> pd.DataFrame:
     try:
         # 读取Excel文件
-        file_path = "/workspaces/dior-product/Stock_Merged_Result.xlsx"
+        file_path = f'Stock_Merged_Result.xlsx'
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Stock File Not Found: {file_path}")
 
