@@ -3,7 +3,6 @@ from dashscope import Application
 from http import HTTPStatus
 import os
 import re
-import sys
 import json
 import pandas as pd
 from typing import Dict, Callable, List, Any
@@ -60,7 +59,7 @@ def show_image(doc_name):
         st.warning(f"Image not found: {image_path}")
         st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
 
-# 辅助函数 - 显示文档引用
+# 辅助函数 - 显示文档引用（统一逻辑）
 def show_references(doc_references):
     st.divider()
     st.subheader("📚 References")
@@ -122,7 +121,7 @@ def query_stock(mmc: str = None, size_code: str = None, product_name: str = None
         st.error(f"Error in Stock Query: {str(e)}")
         return pd.DataFrame()
 
-# 聊天机器人类（核心流式处理逻辑）
+# 聊天机器人类（完全复用HR Bot的流式逻辑）
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
@@ -131,16 +130,12 @@ class ChatBot:
         self.json_pattern = re.compile(r'({.*?})$', re.DOTALL)  # 匹配末尾JSON
 
     def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
-        # 管理消息历史
         if len(self.messages) >= 7:
             self.messages.pop(1)
         self.messages.append({"role": "user", "content": message})
         
         full_rsp = ""
         doc_references = []
-        in_json = False  # 标记是否进入JSON解析模式
-        json_buffer = ""  # 不完整JSON缓冲区
-
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
@@ -156,47 +151,44 @@ class ChatBot:
                 print(f"API Error: {response.message}")
                 continue
             
-            chunk = response.output.text or ""
+            output_text = response.output.text or ""
+            match = self.json_pattern.search(output_text)
             
-            # 检测JSON起始位置
-            match = self.json_pattern.search(chunk)
-            if match and not in_json:
-                # 拆分自然语言和JSON部分
-                natural_part = chunk[:match.start()].strip()
-                json_part = chunk[match.start():]
+            if match:
+                # 分离自然语言和JSON
+                natural_text = output_text[:match.start()].strip()
+                json_str = output_text[match.start():]
                 
-                # 处理自然语言部分
-                if natural_part:
-                    self._stream_output(natural_part, stream_callback, full_rsp)
+                # 先流式输出自然语言
+                if natural_text:
+                    self._stream_update(stream_callback, natural_text, full_rsp)
                 
-                # 开始处理JSON
-                in_json = True
-                json_buffer += json_part
-            elif in_json:
-                # 拼接不完整的JSON
-                json_buffer += chunk
+                # 解析JSON
                 try:
-                    # 尝试解析完整JSON
-                    json_data = json.loads(json_buffer)
-                    self._process_json(json_data, stream_callback, full_rsp, doc_references)
-                    in_json = False
-                    json_buffer = ""  # 重置缓冲区
+                    json_data = json.loads(json_str)
+                    result = json_data.get("result", "").strip()
+                    refs = json_data.get("doc_references", [])
+                    
+                    # 输出JSON中的结果
+                    if result:
+                        self._stream_update(stream_callback, result, full_rsp)
+                    
+                    # 处理引用
+                    if isinstance(refs, str):
+                        refs = json.loads(refs) if refs else []
+                    doc_references.extend(refs)
+                    
                 except json.JSONDecodeError:
-                    # 继续等待后续chunk
-                    pass
+                    # 若JSON不完整，忽略并继续（由后续chunk补全）
+                    full_rsp += output_text
+                    if stream_callback:
+                        stream_callback(output_text)
             else:
-                # 纯文本直接处理
-                self._stream_output(chunk, stream_callback, full_rsp)
+                # 纯文本直接流式输出
+                self._stream_update(stream_callback, output_text, full_rsp)
         
-        # 处理剩余的不完整JSON（如果有）
-        if in_json and json_buffer:
-            try:
-                json_data = json.loads(json_buffer)
-                self._process_json(json_data, stream_callback, full_rsp, doc_references)
-            except:
-                pass  # 忽略无法解析的残留数据
-
-        # 保存对话历史
+        # 清理残留符号
+        full_rsp = re.sub(r'[{}"\n]', '', full_rsp.strip())
         self.messages.append({
             "role": "assistant",
             "content": full_rsp,
@@ -204,33 +196,12 @@ class ChatBot:
         })
         return {"full_rsp": full_rsp, "doc_references": doc_references}
 
-    def _stream_output(self, text: str, callback: Callable, full_rsp: str) -> None:
-        """实时输出自然语言文本"""
-        if text:
-            if callback:
-                callback(text)
-            full_rsp += text
-            print(text, end="", flush=True)
-
-    def _process_json(self, json_data: dict, callback: Callable, full_rsp: str, doc_references: List) -> None:
-        """处理解析后的JSON数据"""
-        result = json_data.get("result", "").strip()
-        refs = json_data.get("doc_references", [])
-        
-        # 输出JSON中的result字段
-        if result:
-            if callback:
-                callback(result)
-            full_rsp += result
-            print(result, end="", flush=True)
-        
-        # 处理文档引用
-        if isinstance(refs, str):
-            try:
-                refs = json.loads(refs)
-            except:
-                refs = []
-        doc_references.extend([ref for ref in refs if ref])  # 去重并过滤空值
+    def _stream_update(self, callback: Callable, text: str, full_rsp: str) -> None:
+        """实时更新界面和完整响应"""
+        if text and callback:
+            callback(text)
+        full_rsp += text
+        print(text, end="", flush=True)
 
 # 初始化聊天机器人
 if "chatbot" not in st.session_state:
@@ -244,29 +215,27 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理
+# 用户输入处理（流式回调绑定）
 if prompt := st.chat_input("Ask a question about Dior products..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
     with st.chat_message("assistant", avatar="🤖"):
         message_placeholder = st.empty()
-        current_response = [""]  # 使用列表保持可变状态
+        current_text = [""]  # 使用列表保持可变状态
         
         def stream_callback(chunk: str) -> None:
-            """流式更新界面"""
-            current_response[0] += chunk
-            message_placeholder.markdown(current_response[0] + "▌")  # 末尾加载符号
+            """实时更新界面，追加内容并显示加载符号"""
+            current_text[0] += chunk
+            message_placeholder.markdown(current_text[0] + "▌")
         
         try:
             response = st.session_state.chatbot.ask(prompt, stream_callback)
             full_response = response["full_rsp"].replace("▌", "").strip()  # 移除加载符号
             doc_references = response["doc_references"]
             
-            # 显示完整响应
+            # 显示完整响应和引用
             message_placeholder.markdown(full_response)
-            
-            # 显示文档引用
             if doc_references:
                 show_references(doc_references)
             
@@ -281,7 +250,7 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
             message_placeholder.error(f"⚠️ Error: {str(e)}")
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": "Apologies, an error occurred. Please try again later."
+                "content": "Sorry, an error occurred. Please try again later."
             })
 
 # ===== 库存查询模块 =====
