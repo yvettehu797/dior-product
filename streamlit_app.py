@@ -147,6 +147,7 @@ class ChatBot:
             messages=self.messages,
             prompt=message,
             stream=True,
+            flow_stream_mode="agent_format",
             incremental_output=True
         )
 
