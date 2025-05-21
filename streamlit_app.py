@@ -249,18 +249,15 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                     show_references(doc_references)
 
                 if stock_info:
-                st.divider()
-                st.subheader("📦 Stock Query")
-
-                # 提取库存信息
-                mmc = stock_info.get("mmc", "")
-                size_code = stock_info.get("size_code", "")
-                product_name = stock_info.get("product_name", "")
-
-                # 执行查询
-                with st.spinner("Querying stock availability..."):
-                    result_df = query_stock(mmc, size_code, product_name)
-
+                    st.divider()
+                    st.subheader("📦 Stock Query")
+                    # 提取库存信息
+                    mmc = stock_info.get("mmc", "")
+                    size_code = stock_info.get("size_code", "")
+                    product_name = stock_info.get("product_name", "")
+                    # 执行查询
+                    with st.spinner("Querying stock availability..."):
+                        result_df = query_stock(mmc, size_code, product_name)
                     # 显示结果
                     if not result_df.empty:
                         st.success(f"Found {len(result_df)} matching records")
@@ -277,7 +274,6 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
                 })
             except Exception as e:
                 message_placeholder.error(f"⚠️ Error: {str(e)}")
-
 # ===== 库存查询模块 =====
 with st.sidebar:
     if st.button("📦 Show Stock Query" if not st.session_state.show_stock_query else "❌ Hide Stock Query"):
