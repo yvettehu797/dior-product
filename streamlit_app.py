@@ -121,21 +121,18 @@ def query_stock(mmc: str = None, size_code: str = None, product_name: str = None
         st.error(f"Error in Stock Query: {str(e)}")
         return pd.DataFrame()
 
-# 聊天机器人类（完全复用HR Bot的流式逻辑）
+# 聊天机器人类
 class ChatBot:
     def __init__(self, api_key: str, app_id: str):
         self.api_key = api_key
         self.app_id = app_id
         self.messages = []
-        self.json_pattern = re.compile(r'({.*?})$', re.DOTALL)  # 匹配末尾JSON
 
     def ask(self, message: str, stream_callback: Callable[[str], None] = None) -> Dict:
         if len(self.messages) >= 7:
-            self.messages.pop(1)
-        self.messages.append({"role": "user", "content": message})
+            self.messages.pop(1)  # 保留首尾，仅删除中间对话（示例逻辑，可根据需求调整）
         
-        full_rsp = ""
-        doc_references = []
+        self.messages.append({"role": "user", "content": message})
         responses = Application.call(
             api_key=self.api_key,
             app_id=self.app_id,
@@ -145,63 +142,74 @@ class ChatBot:
             flow_stream_mode="agent_format",
             incremental_output=True
         )
-
+        
+        full_rsp = ""
+        doc_references = []
+        stock_info = None
+        json_pattern = re.compile(r'({.*?})$', re.DOTALL)  # 匹配末尾的 JSON 结构
+        
         for response in responses:
             if response.status_code != HTTPStatus.OK:
-                print(f"API Error: {response.message}")
+                print(f"Request failed: {response.message}")
                 continue
             
             output_text = response.output.text or ""
-            match = self.json_pattern.search(output_text)
             
+            # 尝试提取 JSON 部分（假设 JSON 位于文本末尾）
+            match = json_pattern.search(output_text)
             if match:
-                # 分离自然语言和JSON
-                natural_text = output_text[:match.start()].strip()
-                json_str = output_text[match.start():]
-                
-                # 先流式输出自然语言
-                if natural_text:
-                    self._stream_update(stream_callback, natural_text, full_rsp)
-                
-                # 解析JSON
+                json_str = match.group(1)
+                natural_text = output_text[:match.start()].strip()  # 自然语言部分
                 try:
                     json_data = json.loads(json_str)
-                    result = json_data.get("result", "").strip()
+                    full_rsp += natural_text  # 先添加自然语言内容
+                    
+                    # 提取文档引用（处理列表或字符串情况）
                     refs = json_data.get("doc_references", [])
-                    
-                    # 输出JSON中的结果
-                    if result:
-                        self._stream_update(stream_callback, result, full_rsp)
-                    
-                    # 处理引用
                     if isinstance(refs, str):
                         refs = json.loads(refs) if refs else []
-                    doc_references.extend(refs)
-                    
+                    doc_references = refs
+
+                    if "stock" in json_data:
+                        try:
+                            # 先处理可能多余的包裹格式
+                            stock_json = json_data["stock"]
+                            if stock_json.startswith("```json\n") and stock_json.endswith("\n```"):
+                                stock_json = stock_json[8:-3]
+                            stock_data = json.loads(stock_json)
+                            stock_info = stock_data
+                        except json.JSONDecodeError:
+                            stock_info = None
+                            
+                    # 处理结果字段（若存在）
+                    result = json_data.get("result", "")
+                    if result:
+                        full_rsp += result
                 except json.JSONDecodeError:
-                    # 若JSON不完整，忽略并继续（由后续chunk补全）
-                    full_rsp += output_text
-                    if stream_callback:
-                        stream_callback(output_text)
+                    full_rsp += output_text  # 解析失败时 fallback 至原始文本
             else:
-                # 纯文本直接流式输出
-                self._stream_update(stream_callback, output_text, full_rsp)
+                full_rsp += output_text  # 无 JSON 时直接累加文本
+            
+            # 流式输出处理
+            if stream_callback and output_text:
+                stream_callback(output_text)
+            print(output_text, end="", flush=True)
         
-        # 清理残留符号
-        full_rsp = re.sub(r'[{}"\n]', '', full_rsp.strip())
+        # 清理可能残留的 JSON 标记（如首尾括号/逗号）
+        full_rsp = re.sub(r'^[\{\",]|[\}\",]$', '', full_rsp).strip()
+        
+        # 确保文档引用为列表类型
+        if not isinstance(doc_references, list):
+            doc_references = [doc_references] if doc_references else []
+        
+        # 存储对话历史（包含文档引用）
         self.messages.append({
             "role": "assistant",
             "content": full_rsp,
-            "doc_references": doc_references
+            "doc_references": doc_references,
+            "stock_info": stock_info
         })
-        return {"full_rsp": full_rsp, "doc_references": doc_references}
-
-    def _stream_update(self, callback: Callable, text: str, full_rsp: str) -> None:
-        """实时更新界面和完整响应"""
-        if text and callback:
-            callback(text)
-        full_rsp += text
-        print(text, end="", flush=True)
+        return {"full_rsp": full_rsp, "doc_references": doc_references, "stock_info": stock_info}
 
 # 初始化聊天机器人
 if "chatbot" not in st.session_state:
@@ -215,43 +223,60 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
-# 用户输入处理（流式回调绑定）
+# 用户输入处理
 if prompt := st.chat_input("Ask a question about Dior products..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user", avatar="👤"):
-        st.markdown(prompt)
-    with st.chat_message("assistant", avatar="🤖"):
-        message_placeholder = st.empty()
-        current_text = [""]  # 使用列表保持可变状态
-        
-        def stream_callback(chunk: str) -> None:
-            """实时更新界面，追加内容并显示加载符号"""
-            current_text[0] += chunk
-            message_placeholder.markdown(current_text[0] + "▌")
-        
-        try:
-            response = st.session_state.chatbot.ask(prompt, stream_callback)
-            full_response = response["full_rsp"].replace("▌", "").strip()  # 移除加载符号
-            doc_references = response["doc_references"]
-            
-            # 显示完整响应和引用
-            message_placeholder.markdown(full_response)
-            if doc_references:
-                show_references(doc_references)
-            
-            # 更新会话历史
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": full_response,
-                "doc_references": doc_references
-            })
-            
-        except Exception as e:
-            message_placeholder.error(f"⚠️ Error: {str(e)}")
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "Sorry, an error occurred. Please try again later."
-            })
+    if api_key and app_id:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(prompt)
+        with st.chat_message("assistant", avatar="🤖"):
+            message_placeholder = st.empty()
+            resp_container = [""]
+            def stream_callback(chunk: str) -> None:
+                resp_container[0] += chunk
+                message_placeholder.markdown(resp_container[0] + "▌")
+            try:
+                response = st.session_state.chatbot.ask(prompt, stream_callback)
+                full_response = response["full_rsp"]
+                doc_references = response["doc_references"]
+                stock_info = response["stock_info"]
+                
+                # 添加合规性尾部提示
+                hr_compliant_response = f"{full_response}\n\n---\n*For more product information, please visit our official website.*"
+                message_placeholder.markdown(hr_compliant_response)
+                
+                if doc_references:
+                    show_references(doc_references)
+
+                if stock_info:
+                st.divider()
+                st.subheader("📦 Stock Query")
+
+                # 提取库存信息
+                mmc = stock_info.get("mmc", "")
+                size_code = stock_info.get("size_code", "")
+                product_name = stock_info.get("product_name", "")
+
+                # 执行查询
+                with st.spinner("Querying stock availability..."):
+                    result_df = query_stock(mmc, size_code, product_name)
+
+                    # 显示结果
+                    if not result_df.empty:
+                        st.success(f"Found {len(result_df)} matching records")
+                        st.dataframe(result_df)
+                    else:
+                        st.warning("No matching inventory records found. Please provide more information.")
+
+                # 更新会话状态
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": hr_compliant_response,
+                    "doc_references": doc_references,
+                    "stock_info": stock_info
+                })
+            except Exception as e:
+                message_placeholder.error(f"⚠️ Error: {str(e)}")
 
 # ===== 库存查询模块 =====
 with st.sidebar:
