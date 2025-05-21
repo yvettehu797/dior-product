@@ -3,6 +3,7 @@ from dashscope import Application
 from http import HTTPStatus
 import os
 import re
+import sys
 import json
 import pandas as pd
 from typing import Dict, Callable, List, Any
@@ -33,22 +34,30 @@ with st.sidebar:
 
     st.divider()
 
-# ===== 聊天区初始化 =====
+# ===== 聊天区 =====
 if not api_key or not app_id:
     st.warning("⚠️ Please provide App ID and API Key", icon="🔑")
     st.stop()
 
 # 初始化会话状态
 if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": """
+    Bonjour! Welcome to the Dior Product Assistant.
+    \nHow can I help you today?
+    """}]
+
+# 初始化会话状态
+if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "Bonjour! Welcome to the Dior Product Assistant.\nHow can I help you today?"}
     ]
+
 if "doc_references" not in st.session_state:
-    st.session_state.doc_references = {}
+    st.session_state.doc_references = {}  # 字典类型
 if "show_stock_query" not in st.session_state:
-    st.session_state.show_stock_query = False
+    st.session_state.show_stock_query = False  # 布尔类型
 if "stock_query" not in st.session_state:
-    st.session_state.stock_query = {}
+    st.session_state.stock_query = {}  # 字典类型
 
 # 辅助函数 - 显示图片
 def show_image(doc_name):
@@ -57,18 +66,21 @@ def show_image(doc_name):
         st.image(image_path, caption=f"{doc_name}", use_container_width=True)
     else:
         st.warning(f"Image not found: {image_path}")
-        st.image(f'images/截屏2025-05-09 17.19.08.png', caption="Placeholder Image", use_container_width=True)
+        st.image(f'images/截屏2025-05-09 17.19.08.png',
+                 caption="Placeholder Image", use_container_width=True)
 
-# 辅助函数 - 显示文档引用（统一逻辑）
+# 辅助函数 - 显示文档引用
 def show_references(doc_references):
     st.divider()
     st.subheader("📚 References")
+
     for i, reference in enumerate(doc_references):
         if isinstance(reference, dict):
             for k, v in reference.items():
                 st.caption(f"Reference {k}: {v}")
         else:
             st.caption(f"Reference {i + 1}: {reference}")
+
     with st.expander("🖼️ View Related Images"):
         for reference in doc_references:
             if isinstance(reference, dict):
@@ -81,45 +93,73 @@ def show_references(doc_references):
 def show_stock_query():
     st.divider()
     st.subheader("📦 Stock Inquiry")
+
+    # 创建三列布局
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.session_state.stock_query["mmc"] = st.text_input("MMC", key="stock_mmc")
+        st.session_state.stock_query["mmc"] = st.text_input(
+            "MMC",
+            value=st.session_state.stock_query.get("mmc", ""),
+            key="stock_mmc"
+        )
     with col2:
-        st.session_state.stock_query["size"] = st.text_input("Size", key="stock_size")
+        st.session_state.stock_query["size"] = st.text_input(
+            "Size",
+            value=st.session_state.stock_query.get("size", ""),
+            key="stock_size"
+        )
     with col3:
-        st.session_state.stock_query["product"] = st.text_input("Product Name", key="stock_product")
-    if st.button("🔍 Check Stock Availability", key="stock_check_btn"):
+        st.session_state.stock_query["product"] = st.text_input(
+            "Product Name",
+            value=st.session_state.stock_query.get("product", ""),
+            key="stock_product"
+        )
+
+    # 执行查询
+    if st.button("🔍 Check Stock Availability") or st.session_state.auto_query:
         with st.spinner("Querying..."):
-            result_df = query_stock(**st.session_state.stock_query)
+            result_df = query_stock(
+                st.session_state.stock_query["mmc"],
+                st.session_state.stock_query["size"],
+                st.session_state.stock_query["product"]
+            )
+
             if not result_df.empty:
                 st.success(f"Found {len(result_df)} matching records")
                 st.dataframe(result_df)
             else:
                 st.warning("No matching inventory records found.")
 
-# 库存查询函数
-@st.cache_data(ttl=600)
+
+# 新增：库存查询函数
+@st.cache_data(ttl=600)  
 def query_stock(mmc: str = None, size_code: str = None, product_name: str = None) -> pd.DataFrame:
     try:
-        file_path = "Stock_Merged_Result.xlsx"
+        # 读取Excel文件
+        file_path = f'Stock_Merged_Result.xlsx'
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Stock File Not Found: {file_path}")
+
         df = pd.read_excel(file_path)
-        filters = []
+
+        # 根据条件过滤数据
         if mmc:
-            filters.append(df['mmc'] == mmc)
-        if size_code:
-            filters.append(df['size_code'] == size_code)
-        if product_name:
-            filters.append(df['style_label'].str.contains(product_name, na=False, case=False))
-        if filters:
-            filtered_df = df[pd.concat(filters, axis=1).all(axis=1)]
+            filtered_df = df[df['mmc'] == mmc]
+            if size_code:
+                filtered_df = filtered_df[filtered_df['size_code'] == size_code]
+        elif product_name:
+            filtered_df = df[df['style_label'].str.contains(product_name, na=False, case=False)]
+            if size_code:
+                filtered_df = filtered_df[filtered_df['size_code'] == size_code]
         else:
-            filtered_df = pd.DataFrame()
+            return pd.DataFrame()
+
         return filtered_df
+
     except Exception as e:
         st.error(f"Error in Stock Query: {str(e)}")
         return pd.DataFrame()
+
 
 # 聊天机器人类
 class ChatBot:
