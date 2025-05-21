@@ -263,6 +263,10 @@ for msg in st.session_state.messages:
         if msg["role"] == "assistant" and msg.get("doc_references"):
             show_references(msg["doc_references"])
 
+# 显示当前库存查询部分（如果应该显示）
+if st.session_state.show_stock_query:
+    show_stock_query()
+    
 # 用户输入处理
 if prompt := st.chat_input("Ask a question about Dior products..."):
     if api_key and app_id:
