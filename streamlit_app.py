@@ -44,7 +44,7 @@ if "messages" not in st.session_state:
         {"role": "assistant", "content": "Bonjour! Welcome to the Dior Product Assistant.\nHow can I help you today?"}
     ]
 if "doc_references" not in st.session_state:
-    st.session_state.doc_references = []
+    st.session_state.doc_references = {}
 if "show_stock_query" not in st.session_state:
     st.session_state.show_stock_query = False
 if "stock_query" not in st.session_state:
