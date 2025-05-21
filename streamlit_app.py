@@ -277,11 +277,10 @@ if prompt := st.chat_input("Ask a question about Dior products..."):
 
 # ===== 库存查询模块 =====
 with st.sidebar:
-    if st.button("📦 Show Stock Query" if not st.session_state.show_stock_query else "❌ Hide Stock Query"):
+    if st.button("❌ Hide Stock Query" if st.session_state.show_stock_query else "📦 Show Stock Query"):
         st.session_state.show_stock_query = not st.session_state.show_stock_query
+        st.session_state.auto_query = False
         st.rerun()
-    if st.session_state.show_stock_query:
-        show_stock_query()
 
     if st.button("🔄 Clear Conversation"):
         st.session_state.messages = [{"role": "assistant", "content": "How can I help you today?"}]
